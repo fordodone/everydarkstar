@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EveryDarkStarBot'
+Parameters:
+  StackName:
+    Type: String
+  LambdaPackageVersion:
+    Type: String
+
+Resources:
+  LambdaS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: 'Retain'
+    Properties:
+      BucketName: 'everydarkstar.today'
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - 
+          Key: 'project'
+          Value: !Ref StackName
+
+  KMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: !Ref StackName
+      Enabled: true
+      EnableKeyRotation: false
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - 
+            Sid: 'Allow root account administration of the key'
+            Effect: 'Allow'
+            Principal:
+              AWS:
+                Fn::Join:
+                - ':'
+                - - 'arn:aws:iam:'
+                  - Ref: AWS::AccountId
+                  - 'root'
+            Action:
+              - 'kms:*'
+            Resource: '*'
+      Tags:
+        - Key: 'project'
+          Value: !Ref StackName
+
+  CWLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Join [ '/', [ '/aws/lambda', !Ref StackName ] ]
+      RetentionInDays: 7
+
+  LambdaFunctionIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Join ['-', [ !Ref StackName , 'LambdaRole' ] ]
+      Path: '/service-role/'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          -
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        -
+          PolicyName: !Join [ '-', [ !Ref StackName , 'LambdaRolePolicy' ] ]
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              -
+                Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Join [ '', [ 'arn:aws:logs:us-west-1:*:log-group:/aws/lambda/', !Ref StackName , ':*' ] ]
+              -
+                Effect: 'Allow'
+                Action:
+                  - 's3:getObject'
+                Resource: 'arn:aws:s3:::everydarkstar.today/data/shows.json'
+              -
+                Effect: 'Allow'
+                Action:
+                  - 'kms:Decrypt'
+                Resource: !GetAtt KMSKey.Arn
+
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    DependsOn:
+      - LambdaS3Bucket
+      - LambdaFunctionIAMRole
+    Properties:
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Join [ '/' , [ 'functions' , 'package.zip' ] ]
+        S3ObjectVersion: !Ref LambdaPackageVersion
+      Description: !Ref StackName
+      FunctionName: !Ref StackName
+      Handler: 'main.handler'
+      KmsKeyArn: !GetAtt KMSKey.Arn
+      MemorySize: 128
+      Role: !GetAtt LambdaFunctionIAMRole.Arn
+      Runtime: 'python2.7'
+      Timeout: 10
+      Tags:
+        -
+          Key: 'project'
+          Value: !Ref StackName
+
+  LambdaPermission:
+    Type: 'AWS::Lambda::Permission'
+    DependsOn:
+      - LambdaFunction
+      - CWEventsRule
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: 'lambda:InvokeFunction'
+      Principal: 'events.amazonaws.com'
+      SourceArn: !GetAtt CWEventsRule.Arn
+
+  CWEventsRule:
+    Type: 'AWS::Events::Rule'
+    DependsOn:
+      - LambdaFunction
+    Properties:
+      Description: !Ref StackName
+      Name: !Ref StackName
+      ScheduleExpression: 'cron(0 17 * * ? *)'
+      State: 'ENABLED'
+      Targets:
+        -
+          Arn: !GetAtt LambdaFunction.Arn
+          Id: '1'
+

@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "StackName",
+    "ParameterValue": "EveryDarkStarBot"
+  },
+  {
+    "ParameterKey": "LambdaPackageVersion",
+    "ParameterValue": "VWjcgcr5Qq0gaHcfyhzkbXnKusaHkdHN"
+  }
+]
